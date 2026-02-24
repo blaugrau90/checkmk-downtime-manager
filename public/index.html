@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Checkmk Downtime Manager</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --green: #13b16b;
+      --green-dark: #0e8f55;
+      --green-light: #1ad47f;
+      --green-dim: rgba(19, 177, 107, 0.12);
+      --green-border: rgba(19, 177, 107, 0.35);
+      --bg: #111827;
+      --surface: #1f2937;
+      --surface2: #263144;
+      --border: #374151;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --error: #f87171;
+      --error-bg: rgba(248, 113, 113, 0.1);
+      --radius: 8px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 32px 16px;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 640px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 20px 24px;
+      background: linear-gradient(135deg, #0d1a12 0%, #0f2318 100%);
+      border-bottom: 1px solid var(--green-border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+    }
+
+    .card-header h1 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: 0.02em;
+    }
+
+    .card-header span {
+      font-size: 0.8rem;
+      color: var(--green);
+      margin-left: auto;
+      font-weight: 500;
+    }
+
+    .card-body { padding: 24px; }
+
+    .field { margin-bottom: 20px; }
+
+    label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 8px;
+    }
+
+    select, input[type="text"], input[type="datetime-local"], textarea {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 0.95rem;
+      padding: 10px 12px;
+      outline: none;
+      transition: border-color 0.15s;
+      appearance: none;
+    }
+
+    select:focus, input:focus, textarea:focus {
+      border-color: var(--green);
+    }
+
+    select { cursor: pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%239ca3af' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
+
+    select:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Host search */
+    .search-wrapper { position: relative; }
+    .search-icon {
+      position: absolute;
+      left: 11px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      pointer-events: none;
+    }
+    .search-wrapper input { padding-left: 34px; }
+
+    .host-list {
+      margin-top: 8px;
+      max-height: 200px;
+      overflow-y: auto;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      display: none;
+    }
+    .host-list.visible { display: block; }
+    .host-item {
+      padding: 9px 12px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      color: var(--text);
+      border-bottom: 1px solid var(--border);
+      transition: background 0.1s;
+    }
+    .host-item:last-child { border-bottom: none; }
+    .host-item:hover { background: var(--green-dim); }
+    .host-item.selected { background: var(--green-dim); color: var(--green-light); font-weight: 500; }
+
+    .selected-host {
+      margin-top: 8px;
+      padding: 8px 12px;
+      background: var(--green-dim);
+      border: 1px solid var(--green-border);
+      border-radius: var(--radius);
+      font-size: 0.9rem;
+      color: var(--green-light);
+      display: none;
+    }
+    .selected-host.visible { display: flex; align-items: center; justify-content: space-between; }
+    .clear-host { cursor: pointer; color: var(--text-muted); font-size: 1rem; line-height: 1; }
+    .clear-host:hover { color: var(--error); }
+
+    /* Scope radio */
+    .radio-group { display: flex; gap: 12px; }
+    .radio-label {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 0.9rem;
+      color: var(--text);
+      transition: border-color 0.15s, background 0.15s;
+      text-transform: none;
+      letter-spacing: 0;
+      font-weight: 400;
+    }
+    .radio-label:hover { border-color: var(--green-border); }
+    .radio-label input[type="radio"] { accent-color: var(--green); }
+    .radio-label.checked { border-color: var(--green); background: var(--green-dim); color: var(--green-light); }
+
+    /* Service checkboxes */
+    .service-actions { display: flex; gap: 8px; margin-bottom: 10px; }
+    .btn-sm {
+      padding: 5px 10px;
+      font-size: 0.78rem;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .btn-sm:hover { color: var(--green); border-color: var(--green-border); }
+
+    .service-list {
+      max-height: 200px;
+      overflow-y: auto;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .service-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .service-item:last-child { border-bottom: none; }
+    .service-item:hover { background: rgba(255,255,255,0.03); }
+    .service-item input[type="checkbox"] { accent-color: var(--green); width: 15px; height: 15px; cursor: pointer; }
+    .service-item span { font-size: 0.88rem; color: var(--text); }
+
+    /* Duration quick buttons */
+    .duration-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .btn-duration {
+      padding: 7px 14px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-duration:hover, .btn-duration.active {
+      background: var(--green-dim);
+      border-color: var(--green);
+      color: var(--green-light);
+    }
+
+    .datetime-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .datetime-row .sub-label { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 5px; text-transform: none; letter-spacing: 0; font-weight: 400; }
+
+    /* Divider */
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 12px 0;
+      color: var(--text-muted);
+      font-size: 0.78rem;
+    }
+    .divider::before, .divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    textarea { resize: vertical; min-height: 70px; font-family: inherit; }
+
+    /* Submit */
+    .btn-submit {
+      width: 100%;
+      padding: 13px;
+      background: var(--green);
+      border: none;
+      border-radius: var(--radius);
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .btn-submit:hover:not(:disabled) { background: var(--green-dark); }
+    .btn-submit:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(16px);
+      padding: 12px 20px;
+      border-radius: var(--radius);
+      font-size: 0.9rem;
+      font-weight: 500;
+      opacity: 0;
+      transition: opacity 0.25s, transform 0.25s;
+      z-index: 100;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    .toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .toast.success { background: #064e3b; border: 1px solid var(--green); color: var(--green-light); }
+    .toast.error { background: var(--error-bg); border: 1px solid var(--error); color: var(--error); }
+
+    /* Loading */
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-top-color: var(--green);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .empty-msg { padding: 12px; text-align: center; color: var(--text-muted); font-size: 0.85rem; }
+
+    .hidden { display: none !important; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <div class="card-header">
+    <div class="logo-dot"></div>
+    <h1>Checkmk Downtime Manager</h1>
+    <span id="statusBadge">bereit</span>
+  </div>
+
+  <div class="card-body">
+
+    <!-- Site -->
+    <div class="field">
+      <label>Site</label>
+      <select id="siteSelect">
+        <option value="">Wird geladen…</option>
+      </select>
+    </div>
+
+    <!-- Host -->
+    <div class="field">
+      <label>Host</label>
+      <div class="search-wrapper">
+        <span class="search-icon">⌕</span>
+        <input type="text" id="hostSearch" placeholder="Host suchen…" disabled autocomplete="off" />
+      </div>
+      <div class="host-list" id="hostList"></div>
+      <div class="selected-host" id="selectedHostBadge">
+        <span id="selectedHostName"></span>
+        <span class="clear-host" id="clearHost" title="Host entfernen">✕</span>
+      </div>
+    </div>
+
+    <!-- Scope -->
+    <div class="field hidden" id="scopeField">
+      <label>Downtime-Scope</label>
+      <div class="radio-group">
+        <label class="radio-label checked" id="radioHostLabel">
+          <input type="radio" name="scope" value="host" checked id="radioHost" />
+          Gesamter Host
+        </label>
+        <label class="radio-label" id="radioServiceLabel">
+          <input type="radio" name="scope" value="service" id="radioService" />
+          Bestimmte Services
+        </label>
+      </div>
+    </div>
+
+    <!-- Services -->
+    <div class="field hidden" id="servicesField">
+      <label>Services <span id="serviceCount" style="font-weight:400;text-transform:none;letter-spacing:0"></span></label>
+      <div class="service-actions">
+        <button class="btn-sm" id="btnSelectAll">Alle auswählen</button>
+        <button class="btn-sm" id="btnSelectNone">Keine</button>
+      </div>
+      <div class="service-list" id="serviceList">
+        <div class="empty-msg">Host auswählen um Services zu laden…</div>
+      </div>
+    </div>
+
+    <!-- Duration -->
+    <div class="field hidden" id="timeField">
+      <label>Zeitspanne</label>
+      <div class="duration-buttons" id="durationButtons">
+        <button class="btn-duration" data-minutes="30">30 min</button>
+        <button class="btn-duration" data-minutes="60">1 h</button>
+        <button class="btn-duration" data-minutes="120">2 h</button>
+        <button class="btn-duration" data-minutes="240">4 h</button>
+        <button class="btn-duration" data-minutes="480">8 h</button>
+      </div>
+      <div class="divider">oder manuell</div>
+      <div class="datetime-row">
+        <div>
+          <div class="sub-label">Von</div>
+          <input type="datetime-local" id="startTime" />
+        </div>
+        <div>
+          <div class="sub-label">Bis</div>
+          <input type="datetime-local" id="endTime" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Comment -->
+    <div class="field hidden" id="commentField">
+      <label>Kommentar <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted)">(optional)</span></label>
+      <textarea id="comment" placeholder="Grund für die Downtime…" rows="2"></textarea>
+    </div>
+
+    <!-- Submit -->
+    <button class="btn-submit hidden" id="submitBtn" disabled>
+      <span id="submitText">Downtime setzen</span>
+    </button>
+
+  </div>
+</div>
+
+<footer style="text-align:center;margin-top:20px;padding-bottom:24px;font-size:0.75rem;color:var(--text-muted);">
+  <span id="buildInfo"></span> &nbsp;·&nbsp; &copy; <span id="copyrightYear"></span> Luca-Leon Hausdörfer
+</footer>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  // ── State ────────────────────────────────────────────────────────────────
+  let allHosts = [];
+  let selectedHost = null;
+  let activeDuration = null;
+
+  // ── DOM refs ──────────────────────────────────────────────────────────────
+  const siteSelect      = document.getElementById('siteSelect');
+  const hostSearch      = document.getElementById('hostSearch');
+  const hostList        = document.getElementById('hostList');
+  const selectedHostBadge = document.getElementById('selectedHostBadge');
+  const selectedHostName  = document.getElementById('selectedHostName');
+  const clearHostBtn    = document.getElementById('clearHost');
+  const scopeField      = document.getElementById('scopeField');
+  const servicesField   = document.getElementById('servicesField');
+  const serviceList     = document.getElementById('serviceList');
+  const serviceCount    = document.getElementById('serviceCount');
+  const timeField       = document.getElementById('timeField');
+  const commentField    = document.getElementById('commentField');
+  const submitBtn       = document.getElementById('submitBtn');
+  const startTimeIn     = document.getElementById('startTime');
+  const endTimeIn       = document.getElementById('endTime');
+  const statusBadge     = document.getElementById('statusBadge');
+  const radioHost       = document.getElementById('radioHost');
+  const radioService    = document.getElementById('radioService');
+  const radioHostLabel  = document.getElementById('radioHostLabel');
+  const radioServiceLabel = document.getElementById('radioServiceLabel');
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function show(...els) { els.forEach(el => el.classList.remove('hidden')); }
+  function hide(...els) { els.forEach(el => el.classList.add('hidden')); }
+
+  function showToast(msg, type = 'success') {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = `toast ${type} visible`;
+    setTimeout(() => t.classList.remove('visible'), 3500);
+  }
+
+  function setStatus(text) { statusBadge.textContent = text; }
+
+  function toLocalISO(date) {
+    const pad = n => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  function toUTCISO(localDatetimeStr) {
+    return new Date(localDatetimeStr).toISOString().replace(/\.\d{3}Z$/, '+00:00');
+  }
+
+  function updateSubmitState() {
+    const hasHost = !!selectedHost;
+    const hasTime = startTimeIn.value && endTimeIn.value;
+    const isService = radioService.checked;
+    const hasServices = isService
+      ? [...document.querySelectorAll('#serviceList input[type=checkbox]:checked')].length > 0
+      : true;
+    submitBtn.disabled = !(hasHost && hasTime && hasServices);
+  }
+
+  // ── Sites ─────────────────────────────────────────────────────────────────
+  async function loadSites() {
+    setStatus('lädt Sites…');
+    try {
+      const res = await fetch('/api/sites');
+      const sites = await res.json();
+      siteSelect.innerHTML = '<option value="">– Site auswählen –</option>';
+      if (!sites.length) return;
+      sites.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.name;
+        siteSelect.appendChild(opt);
+      });
+      setStatus('bereit');
+    } catch {
+      siteSelect.innerHTML = '<option value="">Fehler beim Laden</option>';
+      setStatus('Fehler');
+    }
+  }
+
+  siteSelect.addEventListener('change', () => {
+    clearHost();
+    if (siteSelect.value) loadHosts(siteSelect.value);
+  });
+
+  // ── Hosts ─────────────────────────────────────────────────────────────────
+  async function loadHosts(site) {
+    hostSearch.disabled = true;
+    hostSearch.placeholder = 'Hosts werden geladen…';
+    setStatus('lädt Hosts…');
+    allHosts = [];
+    try {
+      const res = await fetch(`/api/hosts?site=${encodeURIComponent(site)}`);
+      allHosts = await res.json();
+      hostSearch.disabled = false;
+      hostSearch.placeholder = `${allHosts.length} Hosts – suchen…`;
+      setStatus(`${allHosts.length} Hosts`);
+      renderHostList(allHosts.slice(0, 60));
+    } catch {
+      hostSearch.placeholder = 'Fehler beim Laden';
+      setStatus('Fehler');
+    }
+  }
+
+  hostSearch.addEventListener('input', () => {
+    const q = hostSearch.value.trim().toLowerCase();
+    const filtered = q
+      ? allHosts.filter(h =>
+          h.name.toLowerCase().includes(q) || (h.displayName && h.displayName.toLowerCase().includes(q))
+        ).slice(0, 60)
+      : allHosts.slice(0, 60);
+    renderHostList(filtered);
+  });
+
+  hostSearch.addEventListener('focus', () => {
+    if (allHosts.length) {
+      const q = hostSearch.value.trim().toLowerCase();
+      const filtered = q
+        ? allHosts.filter(h => h.name.toLowerCase().includes(q)).slice(0, 60)
+        : allHosts.slice(0, 60);
+      renderHostList(filtered);
+    }
+  });
+
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.search-wrapper') && !e.target.closest('.host-list')) {
+      hostList.classList.remove('visible');
+    }
+  });
+
+  function renderHostList(hosts) {
+    hostList.innerHTML = '';
+    if (!hosts.length) {
+      hostList.innerHTML = '<div class="empty-msg">Keine Treffer</div>';
+    } else {
+      hosts.forEach(h => {
+        const div = document.createElement('div');
+        div.className = 'host-item' + (selectedHost?.name === h.name ? ' selected' : '');
+        div.textContent = h.name;
+        div.addEventListener('click', () => selectHost(h));
+        hostList.appendChild(div);
+      });
+    }
+    hostList.classList.add('visible');
+  }
+
+  function selectHost(host) {
+    selectedHost = host;
+    hostList.classList.remove('visible');
+    hostSearch.value = '';
+    selectedHostName.textContent = host.name;
+    selectedHostBadge.classList.add('visible');
+    show(scopeField, timeField, commentField, submitBtn);
+    resetServices();
+    if (radioService.checked) loadServices(host.name);
+    updateSubmitState();
+  }
+
+  function clearHost() {
+    selectedHost = null;
+    hostSearch.value = '';
+    selectedHostBadge.classList.remove('visible');
+    hostList.classList.remove('visible');
+    hide(scopeField, servicesField, timeField, commentField, submitBtn);
+    resetServices();
+    updateSubmitState();
+  }
+
+  clearHostBtn.addEventListener('click', clearHost);
+
+  // ── Scope ─────────────────────────────────────────────────────────────────
+  document.querySelectorAll('input[name="scope"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      radioHostLabel.classList.toggle('checked', radioHost.checked);
+      radioServiceLabel.classList.toggle('checked', radioService.checked);
+      if (radioService.checked) {
+        show(servicesField);
+        if (selectedHost) loadServices(selectedHost.name);
+      } else {
+        hide(servicesField);
+      }
+      updateSubmitState();
+    });
+  });
+
+  // ── Services ──────────────────────────────────────────────────────────────
+  function resetServices() {
+    radioHost.checked = true;
+    radioHostLabel.classList.add('checked');
+    radioServiceLabel.classList.remove('checked');
+    hide(servicesField);
+    serviceList.innerHTML = '<div class="empty-msg">Host auswählen um Services zu laden…</div>';
+    serviceCount.textContent = '';
+  }
+
+  async function loadServices(host) {
+    serviceList.innerHTML = '<div class="empty-msg"><span class="spinner"></span></div>';
+    try {
+      const res = await fetch(`/api/services?host=${encodeURIComponent(host)}`);
+      const services = await res.json();
+      if (!services.length) {
+        serviceList.innerHTML = '<div class="empty-msg">Keine Services gefunden</div>';
+        return;
+      }
+      serviceList.innerHTML = '';
+      services.forEach(s => {
+        const div = document.createElement('div');
+        div.className = 'service-item';
+        div.innerHTML = `<input type="checkbox" value="${escapeHtml(s.name)}" id="svc_${escapeHtml(s.name)}" />
+          <span>${escapeHtml(s.displayName || s.name)}</span>`;
+        div.querySelector('input').addEventListener('change', updateSubmitState);
+        serviceList.appendChild(div);
+      });
+      serviceCount.textContent = `(${services.length})`;
+      updateSubmitState();
+    } catch {
+      serviceList.innerHTML = '<div class="empty-msg">Fehler beim Laden</div>';
+    }
+  }
+
+  document.getElementById('btnSelectAll').addEventListener('click', () => {
+    document.querySelectorAll('#serviceList input[type=checkbox]').forEach(cb => cb.checked = true);
+    updateSubmitState();
+  });
+  document.getElementById('btnSelectNone').addEventListener('click', () => {
+    document.querySelectorAll('#serviceList input[type=checkbox]').forEach(cb => cb.checked = false);
+    updateSubmitState();
+  });
+
+  // ── Duration buttons ──────────────────────────────────────────────────────
+  document.getElementById('durationButtons').addEventListener('click', e => {
+    const btn = e.target.closest('.btn-duration');
+    if (!btn) return;
+    const minutes = parseInt(btn.dataset.minutes);
+    const now = new Date();
+    const end = new Date(now.getTime() + minutes * 60000);
+    startTimeIn.value = toLocalISO(now);
+    endTimeIn.value   = toLocalISO(end);
+    document.querySelectorAll('.btn-duration').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeDuration = minutes;
+    updateSubmitState();
+  });
+
+  startTimeIn.addEventListener('change', () => {
+    document.querySelectorAll('.btn-duration').forEach(b => b.classList.remove('active'));
+    activeDuration = null;
+    updateSubmitState();
+  });
+  endTimeIn.addEventListener('change', () => {
+    document.querySelectorAll('.btn-duration').forEach(b => b.classList.remove('active'));
+    activeDuration = null;
+    updateSubmitState();
+  });
+
+  // ── Submit ────────────────────────────────────────────────────────────────
+  submitBtn.addEventListener('click', async () => {
+    if (submitBtn.disabled) return;
+
+    const type = radioService.checked ? 'service' : 'host';
+    const services = type === 'service'
+      ? [...document.querySelectorAll('#serviceList input[type=checkbox]:checked')].map(cb => cb.value)
+      : [];
+
+    const body = {
+      host: selectedHost.name,
+      type,
+      services,
+      startTime: toUTCISO(startTimeIn.value),
+      endTime:   toUTCISO(endTimeIn.value),
+      comment:   document.getElementById('comment').value.trim(),
+    };
+
+    submitBtn.disabled = true;
+    document.getElementById('submitText').innerHTML = '<span class="spinner"></span> Wird gesetzt…';
+
+    try {
+      const res = await fetch('/api/downtime', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      showToast('✓ Downtime erfolgreich gesetzt!', 'success');
+      document.getElementById('submitText').textContent = 'Downtime setzen';
+    } catch (err) {
+      showToast(`Fehler: ${err.message}`, 'error');
+      document.getElementById('submitText').textContent = 'Downtime setzen';
+    } finally {
+      updateSubmitState();
+    }
+  });
+
+  function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, c =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+    );
+  }
+
+  // ── Init ──────────────────────────────────────────────────────────────────
+  loadSites();
+
+  // Footer
+  document.getElementById('copyrightYear').textContent = new Date().getFullYear();
+  fetch('/api/build').then(r => r.json()).then(d => {
+    document.getElementById('buildInfo').textContent = `v${d.version}`;
+  }).catch(() => {});
+</script>
+</body>
+</html>

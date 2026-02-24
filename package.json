@@ -1,0 +1,17 @@
+{
+  "name": "checkmk-downtime-manager",
+  "version": "1.0.0",
+  "description": "Checkmk Downtime Manager — Web UI for setting host and service downtimes",
+  "author": "blaugrau90",
+  "license": "MIT",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
