@@ -1,7 +1,6 @@
 services:
   checkmk-downtime-manager:
     image: blaugrau90/checkmk-downtime-manager:latest
-    build: .
     ports:
       - "3000:3000"
     env_file: .env
