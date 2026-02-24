@@ -19,6 +19,8 @@ A clean, self-hosted web UI for setting host and service downtimes in Checkmk â€
 ## Screenshots
 
 > Dark UI in Checkmk green, designed for monitoring environments.
+<img width="665" height="336" alt="image" src="https://github.com/user-attachments/assets/3cb4c2f2-e38a-4a57-897a-48b6bb2823af" />
+
 
 ## Quick Start
 
