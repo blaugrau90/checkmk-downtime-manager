@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Downtime Log – Checkmk Downtime Manager</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --green: #13b16b;
+      --green-dark: #0e8f55;
+      --green-light: #1ad47f;
+      --green-dim: rgba(19, 177, 107, 0.12);
+      --green-border: rgba(19, 177, 107, 0.35);
+      --bg: #111827;
+      --surface: #1f2937;
+      --surface2: #263144;
+      --border: #374151;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --error: #f87171;
+      --error-bg: rgba(248, 113, 113, 0.1);
+      --error-border: rgba(248, 113, 113, 0.35);
+      --radius: 8px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 32px 16px;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 780px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 20px 24px;
+      background: linear-gradient(135deg, #0d1a12 0%, #0f2318 100%);
+      border-bottom: 1px solid var(--green-border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+      flex-shrink: 0;
+    }
+
+    .card-header h1 { font-size: 1.1rem; font-weight: 600; letter-spacing: 0.02em; }
+
+    .header-actions {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn-back, .btn-clear {
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid var(--green-border);
+      background: var(--green-dim);
+      color: var(--green-light);
+      text-decoration: none;
+      transition: background 0.15s;
+    }
+    .btn-back:hover { background: rgba(19,177,107,0.2); }
+    .btn-clear {
+      border-color: var(--error-border);
+      background: var(--error-bg);
+      color: var(--error);
+    }
+    .btn-clear:hover { background: rgba(248,113,113,0.18); }
+
+    .card-body { padding: 0; }
+
+    /* Empty state */
+    .empty-state {
+      padding: 48px 24px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+    .empty-state .icon { font-size: 2rem; margin-bottom: 12px; }
+
+    /* Operation entry */
+    .op-entry {
+      border-bottom: 1px solid var(--border);
+    }
+    .op-entry:last-child { border-bottom: none; }
+
+    .op-header {
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.1s;
+    }
+    .op-header:hover { background: rgba(255,255,255,0.02); }
+
+    .op-status {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .op-status.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .op-status.partial { background: #f59e0b; box-shadow: 0 0 6px #f59e0b; }
+    .op-status.fail { background: var(--error); box-shadow: 0 0 6px var(--error); }
+
+    .op-info { flex: 1; min-width: 0; }
+    .op-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-weight: 500;
+    }
+    .badge-mode {
+      background: var(--green-dim);
+      border: 1px solid var(--green-border);
+      color: var(--green-light);
+    }
+    .badge-type {
+      background: rgba(99,102,241,0.12);
+      border: 1px solid rgba(99,102,241,0.3);
+      color: #a5b4fc;
+    }
+    .op-meta {
+      margin-top: 3px;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+    .count-ok { color: var(--green-light); font-weight: 500; }
+    .count-fail { color: var(--error); font-weight: 500; }
+
+    .op-chevron {
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      transition: transform 0.2s;
+      flex-shrink: 0;
+    }
+    .op-entry.open .op-chevron { transform: rotate(90deg); }
+
+    /* Detail panel */
+    .op-detail {
+      display: none;
+      padding: 0 20px 16px 20px;
+      background: rgba(0,0,0,0.15);
+    }
+    .op-entry.open .op-detail { display: block; }
+
+    .detail-section { margin-bottom: 14px; }
+    .detail-section:last-child { margin-bottom: 0; }
+    .detail-label {
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+
+    .host-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+    .host-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      border-radius: 4px;
+      font-size: 0.78rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+    }
+    .host-chip.success {
+      background: var(--green-dim);
+      border: 1px solid var(--green-border);
+      color: var(--green-light);
+    }
+    .host-chip.error {
+      background: var(--error-bg);
+      border: 1px solid var(--error-border);
+      color: var(--error);
+    }
+    .host-chip .dot { font-size: 0.7rem; }
+
+    .error-detail {
+      margin-top: 4px;
+      padding: 6px 10px;
+      background: var(--error-bg);
+      border: 1px solid var(--error-border);
+      border-radius: 5px;
+      font-size: 0.76rem;
+      color: var(--error);
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      word-break: break-word;
+    }
+    .fail-row { margin-bottom: 8px; }
+    .fail-row:last-child { margin-bottom: 0; }
+
+    .time-range {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-family: 'SF Mono', 'Fira Code', monospace;
+    }
+
+    /* Auto-refresh indicator */
+    .refresh-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 24px;
+      background: rgba(0,0,0,0.2);
+      border-bottom: 1px solid var(--border);
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+    .refresh-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+    footer {
+      margin-top: 20px;
+      padding-bottom: 24px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-align: center;
+    }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <div class="card-header">
+    <div class="logo-dot"></div>
+    <h1>Downtime Log</h1>
+    <div class="header-actions">
+      <button class="btn-clear" id="btnClear">Log leeren</button>
+      <a class="btn-back" href="/">← Zurück</a>
+    </div>
+  </div>
+
+  <div class="refresh-bar">
+    <div class="refresh-dot"></div>
+    <span>Aktualisiert automatisch alle 10 Sekunden &nbsp;·&nbsp; <span id="entryCount">0</span> Einträge</span>
+  </div>
+
+  <div class="card-body" id="logBody">
+    <div class="empty-state">
+      <div class="icon">📋</div>
+      <div>Noch keine Downtimes gesetzt.</div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <span id="buildInfo"></span> &nbsp;·&nbsp; &copy; <span id="copyrightYear"></span> blaugrau90
+</footer>
+
+<script>
+  const MODE_LABELS = {
+    none:      'This host only',
+    direct:    'Direct child hosts',
+    recursive: 'Recursive',
+  };
+
+  function formatTS(iso) {
+    const d = new Date(iso);
+    const pad = n => String(n).padStart(2, '0');
+    return `${pad(d.getDate())}.${pad(d.getMonth()+1)}.${d.getFullYear()} `
+         + `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+
+  function formatTime(iso) {
+    const d = new Date(iso);
+    const pad = n => String(n).padStart(2, '0');
+    return `${pad(d.getDate())}.${pad(d.getMonth()+1)}.${d.getFullYear()} `
+         + `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function escHtml(str) {
+    return String(str).replace(/[&<>"']/g, c =>
+      ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])
+    );
+  }
+
+  function renderOp(op, idx) {
+    const hasFailures = op.failed && op.failed.length > 0;
+    const allFailed = op.succeeded.length === 0;
+    const statusClass = allFailed ? 'fail' : hasFailures ? 'partial' : 'ok';
+
+    const modeLabel = MODE_LABELS[op.mode] ?? op.mode;
+    const typeLabel = op.type === 'service' ? 'Services' : 'Host';
+
+    const totalHosts = op.succeeded.length + (op.failed?.length ?? 0);
+
+    const succeededHtml = op.succeeded.map(h =>
+      `<div class="host-chip success"><span class="dot">✓</span>${escHtml(h)}</div>`
+    ).join('');
+
+    const failedHtml = (op.failed ?? []).map(f =>
+      `<div class="fail-row">
+        <div class="host-chip error"><span class="dot">✗</span>${escHtml(f.host)}</div>
+        ${f.reason ? `<div class="error-detail">${escHtml(f.reason)}</div>` : ''}
+      </div>`
+    ).join('');
+
+    return `
+      <div class="op-entry" id="op-${idx}">
+        <div class="op-header" onclick="toggleOp(${idx})">
+          <div class="op-status ${statusClass}"></div>
+          <div class="op-info">
+            <div class="op-title">
+              ${escHtml(op.parentHost)}
+              <span class="badge badge-mode">${escHtml(modeLabel)}</span>
+              <span class="badge badge-type">${escHtml(typeLabel)}</span>
+            </div>
+            <div class="op-meta">
+              <span>${escHtml(formatTS(op.timestamp))}</span>
+              <span class="count-ok">✓ ${op.succeeded.length} erfolgreich</span>
+              ${hasFailures ? `<span class="count-fail">✗ ${op.failed.length} fehlgeschlagen</span>` : ''}
+              <span>${totalHosts} Host${totalHosts !== 1 ? 's' : ''} gesamt</span>
+            </div>
+          </div>
+          <div class="op-chevron">▶</div>
+        </div>
+        <div class="op-detail">
+          <div class="detail-section">
+            <div class="detail-label">Zeitspanne</div>
+            <div class="time-range">
+              ${escHtml(formatTime(op.startTime))} → ${escHtml(formatTime(op.endTime))}
+              ${op.comment ? ` &nbsp;·&nbsp; "${escHtml(op.comment)}"` : ''}
+            </div>
+          </div>
+          ${op.succeeded.length > 0 ? `
+          <div class="detail-section">
+            <div class="detail-label">Erfolgreich (${op.succeeded.length})</div>
+            <div class="host-grid">${succeededHtml}</div>
+          </div>` : ''}
+          ${hasFailures ? `
+          <div class="detail-section">
+            <div class="detail-label">Fehlgeschlagen (${op.failed.length})</div>
+            ${failedHtml}
+          </div>` : ''}
+        </div>
+      </div>`;
+  }
+
+  function toggleOp(idx) {
+    document.getElementById(`op-${idx}`)?.classList.toggle('open');
+  }
+
+  let openEntries = new Set();
+
+  async function loadLog() {
+    try {
+      const res = await fetch('/api/log');
+      const ops = await res.json();
+
+      document.getElementById('entryCount').textContent = ops.length;
+      const body = document.getElementById('logBody');
+
+      if (!ops.length) {
+        body.innerHTML = `<div class="empty-state">
+          <div class="icon">📋</div>
+          <div>Noch keine Downtimes gesetzt.</div>
+        </div>`;
+        return;
+      }
+
+      // Preserve open state
+      document.querySelectorAll('.op-entry.open').forEach(el => {
+        openEntries.add(el.id);
+      });
+
+      body.innerHTML = ops.map((op, i) => renderOp(op, i)).join('');
+
+      // Restore open state
+      openEntries.forEach(id => {
+        document.getElementById(id)?.classList.add('open');
+      });
+
+      // Auto-open first entry if it has failures
+      if (ops[0] && ops[0].failed?.length > 0 && !openEntries.has('op-0')) {
+        document.getElementById('op-0')?.classList.add('open');
+      }
+    } catch (e) {
+      console.error('Failed to load log:', e);
+    }
+  }
+
+  document.getElementById('btnClear').addEventListener('click', async () => {
+    if (!confirm('Log wirklich leeren?')) return;
+    await fetch('/api/log', { method: 'DELETE' });
+    openEntries.clear();
+    loadLog();
+  });
+
+  loadLog();
+  setInterval(loadLog, 10000);
+
+  document.getElementById('copyrightYear').textContent = new Date().getFullYear();
+  fetch('/api/build').then(r => r.json()).then(d => {
+    document.getElementById('buildInfo').textContent = `v${d.version}`;
+  }).catch(() => {});
+</script>
+</body>
+</html>

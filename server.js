@@ -9,6 +9,13 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// In-memory operation log (last 100 entries)
+const recentOps = [];
+function logOp(entry) {
+  recentOps.unshift({ ...entry, timestamp: new Date().toISOString() });
+  if (recentOps.length > 100) recentOps.pop();
+}
+
 const {
   CHECKMK_URL,
   CHECKMK_SITE,
@@ -45,23 +52,58 @@ async function checkmkFetch(endpoint, options = {}) {
   return text ? JSON.parse(text) : null;
 }
 
+// Helper: walk up the folder path to find the nearest inherited parents
+// folderParents: { '/path/to/folder': ['parent1', ...] }
+function getInheritedParents(hostFolder, folderParents) {
+  // Normalize: '' (root) → '/'
+  const folder = hostFolder || '/';
+  // Check the host's own folder first, then each ancestor
+  const parts = folder.split('/').filter(Boolean); // ['vmware','vmware','esxi_server']
+  for (let len = parts.length; len >= 0; len--) {
+    const path = len === 0 ? '/' : '/' + parts.slice(0, len).join('/');
+    if (folderParents[path]?.length > 0) return folderParents[path];
+  }
+  return [];
+}
+
 // Helper: fetch all descendants of a host via parent-child relationships
 async function getDescendants(site, rootHostName, recursive) {
-  const url = `/domain-types/host_config/collections/all?site=${encodeURIComponent(site)}`;
-  const data = await checkmkFetch(url);
+  // 1. Fetch all folder configs to build folder → parents map (handles folder inheritance)
+  const foldersData = await checkmkFetch(
+    '/domain-types/folder_config/collections/all?recursive=true&show_hosts=false'
+  );
+  const folderParents = {};
+  for (const f of foldersData?.value ?? []) {
+    const parents = f.extensions?.attributes?.parents ?? [];
+    if (parents.length > 0) {
+      // Convert Checkmk folder ID (~vmware~esxi) to path (/vmware/esxi)
+      const path = '/' + f.id.replace(/^~/, '').replace(/~/g, '/');
+      folderParents[path.replace(/^\/\//, '/')] = parents; // normalise root '//'→'/'
+    }
+  }
+
+  // 2. Fetch all hosts for the site
+  const data = await checkmkFetch(
+    `/domain-types/host_config/collections/all?site=${encodeURIComponent(site)}`
+  );
   const allHosts = data?.value ?? [];
 
-  // Build parent → children map
+  // 3. Build parent → children map (skip offline hosts)
+  // Direct attributes.parents takes precedence; fall back to folder-inherited parents
   const childrenOf = {};
   for (const h of allHosts) {
-    const parents = h.extensions?.attributes?.parents ?? [];
+    if (h.extensions?.is_offline) continue;
+    const direct = h.extensions?.attributes?.parents ?? [];
+    const parents = direct.length > 0
+      ? direct
+      : getInheritedParents(h.extensions?.folder ?? '', folderParents);
     for (const p of parents) {
       if (!childrenOf[p]) childrenOf[p] = [];
       childrenOf[p].push(h.id);
     }
   }
 
-  // BFS: direct children only, or full tree if recursive
+  // 4. BFS: direct children only, or full tree if recursive
   const result = [];
   const queue = [rootHostName];
   const visited = new Set([rootHostName]);
@@ -104,10 +146,12 @@ app.get('/api/hosts', async (req, res) => {
   try {
     const url = `/domain-types/host_config/collections/all?site=${encodeURIComponent(site)}`;
     const data = await checkmkFetch(url);
-    const hosts = (data?.value ?? []).map((h) => ({
-      name: h.id,
-      displayName: h.extensions?.alias || h.id,
-    }));
+    const hosts = (data?.value ?? [])
+      .filter((h) => !h.extensions?.is_offline)
+      .map((h) => ({
+        name: h.id,
+        displayName: h.extensions?.alias || h.id,
+      }));
     hosts.sort((a, b) => a.name.localeCompare(b.name));
     res.json(hosts);
   } catch (err) {
@@ -174,19 +218,42 @@ app.post('/api/downtime', async (req, res) => {
       const effectiveSite = site || CHECKMK_SITE;
       const childHosts = await getDescendants(effectiveSite, host, recursive);
       const allHosts = [host, ...childHosts];
-      await Promise.all(allHosts.map(h =>
+      // allSettled: continue even if individual requests fail (e.g. duplicate downtime)
+      const results = await Promise.allSettled(allHosts.map(h =>
         checkmkFetch(endpoint, { method: 'POST', body: JSON.stringify(makePayload(h)) })
       ));
-      return res.status(201).json({ success: true, hostsAffected: allHosts.length });
+      const succeeded = [];
+      const failed = [];
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled') {
+          succeeded.push(allHosts[i]);
+        } else {
+          let reason = r.reason?.body;
+          try { reason = JSON.parse(reason)?.detail ?? JSON.parse(reason)?.title ?? reason; } catch {}
+          failed.push({ host: allHosts[i], reason: reason ?? String(r.reason) });
+        }
+      });
+      if (failed.length > 0) {
+        console.warn(`${failed.length} downtime request(s) failed:`, failed);
+      }
+      logOp({ parentHost: host, mode: includeChildren, type, comment,
+               startTime, endTime, succeeded, failed });
+      return res.status(201).json({ success: true, hostsAffected: succeeded.length, failed: failed.length });
     }
 
     await checkmkFetch(endpoint, { method: 'POST', body: JSON.stringify(makePayload(host)) });
+    logOp({ parentHost: host, mode: 'none', type, comment, startTime, endTime,
+             succeeded: [host], failed: [] });
     res.status(201).json({ success: true, hostsAffected: 1 });
   } catch (err) {
     console.error('Error setting downtime:', err);
     res.status(err.status ?? 500).json({ error: 'Failed to set downtime', detail: err.body });
   }
 });
+
+
+app.get('/api/log', (req, res) => res.json(recentOps));
+app.delete('/api/log', (req, res) => { recentOps.length = 0; res.json({ success: true }); });
 
 app.get('/api/build', (req, res) => res.json({ version }));
 

@@ -15,9 +15,9 @@ push:
 ## Build + push in one step
 release: build push
 
-## Run locally with .env
+## Build and run locally (builds from source, does not use published image)
 dev:
-	docker compose up --build
+	docker build -t $(IMAGE):latest . && docker compose up
 
 ## Stop running container
 stop:

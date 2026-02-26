@@ -328,6 +328,7 @@
     <div class="logo-dot"></div>
     <h1>Checkmk Downtime Manager</h1>
     <span id="statusBadge">bereit</span>
+    <a href="/log.html" style="margin-left:8px;padding:4px 12px;border-radius:6px;font-size:0.78rem;font-weight:500;color:var(--text-muted);border:1px solid var(--border);background:var(--surface2);text-decoration:none;transition:color 0.15s,border-color 0.15s;" onmouseover="this.style.color='var(--green-light)';this.style.borderColor='var(--green-border)'" onmouseout="this.style.color='var(--text-muted)';this.style.borderColor='var(--border)'">Log</a>
   </div>
 
   <div class="card-body">
@@ -371,19 +372,19 @@
 
     <!-- Child hosts (nur sichtbar bei scope = host) -->
     <div class="field hidden" id="childField">
-      <label>Kindknoten</label>
+      <label>Child Hosts</label>
       <div class="radio-group" style="flex-direction:column;gap:8px;">
         <label class="radio-label checked" id="radioChildNoneLabel">
           <input type="radio" name="childMode" value="none" checked id="radioChildNone" />
-          Nur dieser Host
+          This host only
         </label>
         <label class="radio-label" id="radioChildDirectLabel">
           <input type="radio" name="childMode" value="direct" id="radioChildDirect" />
-          Direkte Kindknoten einbeziehen
+          Include direct child hosts
         </label>
         <label class="radio-label" id="radioChildRecursiveLabel">
           <input type="radio" name="childMode" value="recursive" id="radioChildRecursive" />
-          Rekursiv (alle Nachfahren)
+          Recursive (all descendants)
         </label>
       </div>
     </div>
@@ -765,7 +766,12 @@
       }
       const result = await res.json().catch(() => ({}));
       const n = result.hostsAffected || 1;
-      showToast(n > 1 ? `✓ Downtime für ${n} Hosts gesetzt!` : '✓ Downtime erfolgreich gesetzt!', 'success');
+      const f = result.failed || 0;
+      if (f > 0) {
+        showToast(`✓ ${n} Hosts gesetzt, ${f} fehlgeschlagen`, 'success');
+      } else {
+        showToast(n > 1 ? `✓ Downtime für ${n} Hosts gesetzt!` : '✓ Downtime erfolgreich gesetzt!', 'success');
+      }
       document.getElementById('submitText').textContent = 'Downtime setzen';
     } catch (err) {
       showToast(`Fehler: ${err.message}`, 'error');
