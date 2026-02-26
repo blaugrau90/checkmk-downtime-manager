@@ -45,6 +45,39 @@ async function checkmkFetch(endpoint, options = {}) {
   return text ? JSON.parse(text) : null;
 }
 
+// Helper: fetch all descendants of a host via parent-child relationships
+async function getDescendants(site, rootHostName, recursive) {
+  const url = `/domain-types/host_config/collections/all?site=${encodeURIComponent(site)}`;
+  const data = await checkmkFetch(url);
+  const allHosts = data?.value ?? [];
+
+  // Build parent → children map
+  const childrenOf = {};
+  for (const h of allHosts) {
+    const parents = h.extensions?.attributes?.parents ?? [];
+    for (const p of parents) {
+      if (!childrenOf[p]) childrenOf[p] = [];
+      childrenOf[p].push(h.id);
+    }
+  }
+
+  // BFS: direct children only, or full tree if recursive
+  const result = [];
+  const queue = [rootHostName];
+  const visited = new Set([rootHostName]);
+  while (queue.length) {
+    const current = queue.shift();
+    for (const child of (childrenOf[current] ?? [])) {
+      if (!visited.has(child)) {
+        visited.add(child);
+        result.push(child);
+        if (recursive) queue.push(child);
+      }
+    }
+  }
+  return result;
+}
+
 // GET /api/sites — List all site connections
 app.get('/api/sites', async (req, res) => {
   try {
@@ -105,7 +138,7 @@ app.get('/api/services', async (req, res) => {
 
 // POST /api/downtime — Set a host or service downtime
 app.post('/api/downtime', async (req, res) => {
-  const { host, type, services, startTime, endTime, comment } = req.body;
+  const { host, type, services, startTime, endTime, comment, includeChildren = 'none', site } = req.body;
 
   if (!host || !type || !startTime || !endTime) {
     return res.status(400).json({ error: 'host, type, startTime, endTime are required' });
@@ -118,17 +151,17 @@ app.post('/api/downtime', async (req, res) => {
     ? '/domain-types/downtime/collections/host'
     : '/domain-types/downtime/collections/service';
 
-  const payload = type === 'host'
+  const makePayload = (hostName) => type === 'host'
     ? {
         downtime_type: 'host',
-        host_name: host,
+        host_name: hostName,
         start_time: startTime,
         end_time: endTime,
         comment: comment || 'Downtime set via Downtime Manager',
       }
     : {
         downtime_type: 'service',
-        host_name: host,
+        host_name: hostName,
         service_descriptions: services,
         start_time: startTime,
         end_time: endTime,
@@ -136,11 +169,19 @@ app.post('/api/downtime', async (req, res) => {
       };
 
   try {
-    await checkmkFetch(endpoint, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    res.status(201).json({ success: true });
+    if (type === 'host' && includeChildren !== 'none') {
+      const recursive = includeChildren === 'recursive';
+      const effectiveSite = site || CHECKMK_SITE;
+      const childHosts = await getDescendants(effectiveSite, host, recursive);
+      const allHosts = [host, ...childHosts];
+      await Promise.all(allHosts.map(h =>
+        checkmkFetch(endpoint, { method: 'POST', body: JSON.stringify(makePayload(h)) })
+      ));
+      return res.status(201).json({ success: true, hostsAffected: allHosts.length });
+    }
+
+    await checkmkFetch(endpoint, { method: 'POST', body: JSON.stringify(makePayload(host)) });
+    res.status(201).json({ success: true, hostsAffected: 1 });
   } catch (err) {
     console.error('Error setting downtime:', err);
     res.status(err.status ?? 500).json({ error: 'Failed to set downtime', detail: err.body });

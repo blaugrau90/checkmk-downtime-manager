@@ -1,6 +1,6 @@
 {
   "name": "checkmk-downtime-manager",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Checkmk Downtime Manager — Web UI for setting host and service downtimes",
   "author": "blaugrau90",
   "license": "MIT",

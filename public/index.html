@@ -369,6 +369,25 @@
       </div>
     </div>
 
+    <!-- Child hosts (nur sichtbar bei scope = host) -->
+    <div class="field hidden" id="childField">
+      <label>Kindknoten</label>
+      <div class="radio-group" style="flex-direction:column;gap:8px;">
+        <label class="radio-label checked" id="radioChildNoneLabel">
+          <input type="radio" name="childMode" value="none" checked id="radioChildNone" />
+          Nur dieser Host
+        </label>
+        <label class="radio-label" id="radioChildDirectLabel">
+          <input type="radio" name="childMode" value="direct" id="radioChildDirect" />
+          Direkte Kindknoten einbeziehen
+        </label>
+        <label class="radio-label" id="radioChildRecursiveLabel">
+          <input type="radio" name="childMode" value="recursive" id="radioChildRecursive" />
+          Rekursiv (alle Nachfahren)
+        </label>
+      </div>
+    </div>
+
     <!-- Services -->
     <div class="field hidden" id="servicesField">
       <label>Services <span id="serviceCount" style="font-weight:400;text-transform:none;letter-spacing:0"></span></label>
@@ -429,6 +448,7 @@
   let allHosts = [];
   let selectedHost = null;
   let activeDuration = null;
+  let selectedChildMode = 'none';
 
   // ── DOM refs ──────────────────────────────────────────────────────────────
   const siteSelect      = document.getElementById('siteSelect');
@@ -451,6 +471,13 @@
   const radioService    = document.getElementById('radioService');
   const radioHostLabel  = document.getElementById('radioHostLabel');
   const radioServiceLabel = document.getElementById('radioServiceLabel');
+  const childField             = document.getElementById('childField');
+  const radioChildNone         = document.getElementById('radioChildNone');
+  const radioChildNoneLabel    = document.getElementById('radioChildNoneLabel');
+  const radioChildDirect       = document.getElementById('radioChildDirect');
+  const radioChildDirectLabel  = document.getElementById('radioChildDirectLabel');
+  const radioChildRecursive    = document.getElementById('radioChildRecursive');
+  const radioChildRecursiveLabel = document.getElementById('radioChildRecursiveLabel');
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   function show(...els) { els.forEach(el => el.classList.remove('hidden')); }
@@ -578,6 +605,7 @@
     selectedHostName.textContent = host.name;
     selectedHostBadge.classList.add('visible');
     show(scopeField, timeField, commentField, submitBtn);
+    if (radioHost.checked) show(childField);
     resetServices();
     if (radioService.checked) loadServices(host.name);
     updateSubmitState();
@@ -588,7 +616,8 @@
     hostSearch.value = '';
     selectedHostBadge.classList.remove('visible');
     hostList.classList.remove('visible');
-    hide(scopeField, servicesField, timeField, commentField, submitBtn);
+    hide(scopeField, childField, servicesField, timeField, commentField, submitBtn);
+    resetChildMode();
     resetServices();
     updateSubmitState();
   }
@@ -602,11 +631,24 @@
       radioServiceLabel.classList.toggle('checked', radioService.checked);
       if (radioService.checked) {
         show(servicesField);
+        hide(childField);
+        resetChildMode();
         if (selectedHost) loadServices(selectedHost.name);
       } else {
         hide(servicesField);
+        if (selectedHost) show(childField);
       }
       updateSubmitState();
+    });
+  });
+
+  // ── Child mode ────────────────────────────────────────────────────────────
+  document.querySelectorAll('input[name="childMode"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      selectedChildMode = radio.value;
+      radioChildNoneLabel.classList.toggle('checked', radioChildNone.checked);
+      radioChildDirectLabel.classList.toggle('checked', radioChildDirect.checked);
+      radioChildRecursiveLabel.classList.toggle('checked', radioChildRecursive.checked);
     });
   });
 
@@ -618,6 +660,14 @@
     hide(servicesField);
     serviceList.innerHTML = '<div class="empty-msg">Host auswählen um Services zu laden…</div>';
     serviceCount.textContent = '';
+  }
+
+  function resetChildMode() {
+    selectedChildMode = 'none';
+    radioChildNone.checked = true;
+    radioChildNoneLabel.classList.add('checked');
+    radioChildDirectLabel.classList.remove('checked');
+    radioChildRecursiveLabel.classList.remove('checked');
   }
 
   async function loadServices(host) {
@@ -693,6 +743,8 @@
       host: selectedHost.name,
       type,
       services,
+      site: siteSelect.value,
+      includeChildren: type === 'host' ? selectedChildMode : 'none',
       startTime: toUTCISO(startTimeIn.value),
       endTime:   toUTCISO(endTimeIn.value),
       comment:   document.getElementById('comment').value.trim(),
@@ -711,7 +763,9 @@
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || `HTTP ${res.status}`);
       }
-      showToast('✓ Downtime erfolgreich gesetzt!', 'success');
+      const result = await res.json().catch(() => ({}));
+      const n = result.hostsAffected || 1;
+      showToast(n > 1 ? `✓ Downtime für ${n} Hosts gesetzt!` : '✓ Downtime erfolgreich gesetzt!', 'success');
       document.getElementById('submitText').textContent = 'Downtime setzen';
     } catch (err) {
       showToast(`Fehler: ${err.message}`, 'error');
